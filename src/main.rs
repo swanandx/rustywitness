@@ -1,31 +1,31 @@
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version};
 use fantoccini::ClientBuilder;
-use std::env;
-use tokio::fs;
-use std::process::{Command, Stdio};
 use once_cell::sync::Lazy;
+use std::env;
+use std::process::{Command, Stdio};
+use tokio::fs;
 
 struct TemporaryProcess(std::process::Child);
 
 impl Drop for TemporaryProcess {
     fn drop(&mut self) {
-        println!("Killing spawned Webdriver process =>PID: {}", self.0.id());
+        println!("Killing spawned webdriver process=> PID: {}", self.0.id());
         self.0.kill().and_then(|_| self.0.wait()).ok();
     }
 }
 
 async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = url.as_str();
-    let driver_instance = Lazy::new(|| { format!("http://localhost:{}", port) });
+    let driver_instance = Lazy::new(|| format!("http://localhost:{}", port));
     let caps = Lazy::new(|| {
         let mut caps = serde_json::map::Map::new();
-    let opts = serde_json::json!({ "args": ["--headless"] });
-    caps.insert("goog:chromeOptions".to_string(), opts.clone());
-    caps.insert("moz:firefoxOptions".to_string(), opts);
-    caps
-
+        let chrome_opts = serde_json::json!({ "args": ["--headless"] });
+        let firefox_opts = serde_json::json!({ "args": ["--headless"] });
+        caps.insert("goog:chromeOptions".to_string(), chrome_opts);
+        caps.insert("moz:firefoxOptions".to_string(), firefox_opts);
+        caps
     });
-    
+
     let mut client = ClientBuilder::native()
         .capabilities((*caps).clone())
         .connect(&driver_instance)
@@ -33,19 +33,15 @@ async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Err
 
     client.set_window_size(1280, 720).await?;
 
-    client.goto(url).await?;
-    let png_data = client.screenshot().await?;
-    client.close().await?;
+    if let Ok(()) = client.goto(url).await {
+        let png_data = client.screenshot().await?;
+        client.close().await?;
+        let filename =
+            "screenshots/".to_owned() + &url.replace("://", "-").replace("/", "_") + ".png";
+        fs::write(filename, &png_data).await?;
 
-    let filename = "screenshots/".to_owned() + &url.replace("://", "-")
-            .replace("/", "_")
-            + ".png";
-    fs::write(
-        filename,
-        &png_data,
-    ).await?;
-
-    println!("[+] Captured screenshot of URL: {}", url);
+        println!("\x1b[0;32m[+] Captured screenshot of URL:\x1b[0m {}", url);
+    }
 
     Ok(())
 }
@@ -83,11 +79,15 @@ async fn run_driver(port: u32, driver_path: Option<&str>) -> TemporaryProcess {
     let port_arg = format!("--port={}", port);
 
     let driver_process = if let Some(driver) = found_driver {
-        TemporaryProcess(Command::new(driver)
-            .arg(port_arg)
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("Provided driver is not valid"))
+        TemporaryProcess(
+            Command::new(driver)
+                .arg(port_arg)
+                .stdout(Stdio::null())
+                .stdin(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Provided driver is not valid"),
+        )
     } else {
         panic!("No WebDriver found :(\nThis program need a WebDriver like chromedriver, geckodriver, etc. for execution");
     };
@@ -107,38 +107,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .get_matches();
 
-    let port = matches.value_of("PORT").unwrap_or("1337").parse().unwrap_or(1337);
+    let port = matches
+        .value_of("PORT")
+        .unwrap_or("1337")
+        .parse()
+        .unwrap_or(1337);
 
     let driver_process = run_driver(port, matches.value_of("DRIVER")).await;
 
-    println!("Started webdriver => PID: {}", driver_process.0.id());
+    println!("Started webdriver=> PID: {}", driver_process.0.id());
 
     if fs::metadata("screenshots/").await.is_err() {
         fs::create_dir("screenshots").await?;
     }
-    
 
     if let Some(url) = matches.value_of("URL") {
         if fs::metadata(url).await.is_ok() {
             let mut handels = Vec::new();
             let lines = fs::read_to_string(url).await?;
-            
+
             for url in lines.lines() {
                 if let Ok(valid_url) = url::Url::parse(url) {
                     handels.push(tokio::spawn(take_ss(valid_url, port)));
                 }
-
             }
 
             for handel in handels {
-                handel.await?.expect("Something went wrong while waiting for taking screenshot and saving to file");
+                handel.await?.expect(
+                    "Something went wrong while waiting for taking screenshot and saving to file",
+                );
             }
-
         } else if let Ok(valid_url) = url::Url::parse(url) {
-                take_ss(valid_url, port).await?;
-            }
+            take_ss(valid_url, port).await?;
+        }
     }
 
-    println!("[*] Done");
+    println!("\x1b[0;34m[*] Done :D\x1b[0m");
     Ok(())
 }
