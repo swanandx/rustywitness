@@ -20,9 +20,7 @@ async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Err
     let caps = Lazy::new(|| {
         let mut caps = serde_json::map::Map::new();
         let chrome_opts = serde_json::json!({ "args": ["--headless"] });
-        let firefox_opts = serde_json::json!({ "args": ["--headless"] });
         caps.insert("goog:chromeOptions".to_string(), chrome_opts);
-        caps.insert("moz:firefoxOptions".to_string(), firefox_opts);
         caps
     });
 
@@ -47,12 +45,14 @@ async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Err
 }
 
 async fn run_driver(port: u32, driver_path: Option<&str>) -> TemporaryProcess {
-    let key = "PATH";
-    let chromedriver = "chromedriver";
-    let geckodriver = "geckodriver";
+    let chromedriver = if cfg!(windows) {
+        "chromedriver.exe"
+    } else {
+        "chromedriver"
+    };
     let mut found_driver: Option<&str> = None;
     if driver_path.is_none() {
-        match env::var_os(key) {
+        match env::var_os("PATH") {
             Some(paths) => {
                 for mut path in env::split_paths(&paths) {
                     // check if chromedriver exists
@@ -60,17 +60,10 @@ async fn run_driver(port: u32, driver_path: Option<&str>) -> TemporaryProcess {
                     if path.as_path().exists() {
                         found_driver = Some(chromedriver);
                         break;
-                    } else {
-                        path.pop();
-                        path.push(geckodriver);
-                        if path.as_path().exists() {
-                            found_driver = Some(geckodriver);
-                            break;
-                        }
                     }
                 }
             }
-            None => println!("{} is not defined in the environment.", key),
+            None => println!("PATH is not defined in the environment."),
         };
     } else {
         found_driver = driver_path;
@@ -89,7 +82,7 @@ async fn run_driver(port: u32, driver_path: Option<&str>) -> TemporaryProcess {
                 .expect("Provided driver is not valid"),
         )
     } else {
-        panic!("No WebDriver found :(\nThis program need a WebDriver like chromedriver, geckodriver, etc. for execution");
+        panic!("No WebDriver found :(\nThis program need a WebDriver like chromedriver");
     };
 
     driver_process
