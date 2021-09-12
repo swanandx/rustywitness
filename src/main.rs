@@ -1,11 +1,16 @@
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version};
 use fantoccini::ClientBuilder;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use std::env;
 use std::process::{Command, Stdio};
 use tokio::fs;
+use std::time::Duration;
+use tokio::time::timeout;
 
 struct TemporaryProcess(std::process::Child);
+
+static DRIVER_INSTANCE: OnceCell<String> = OnceCell::new();
+
 
 impl Drop for TemporaryProcess {
     fn drop(&mut self) {
@@ -14,9 +19,9 @@ impl Drop for TemporaryProcess {
     }
 }
 
-async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn take_ss(url: url::Url) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = url.as_str();
-    let driver_instance = Lazy::new(|| format!("http://localhost:{}", port));
+    let duration = Lazy::new(|| Duration::from_secs(15));
     let caps = Lazy::new(|| {
         let mut caps = serde_json::map::Map::new();
         let chrome_opts = serde_json::json!({ "args": ["--headless"] });
@@ -26,12 +31,13 @@ async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Err
 
     let mut client = ClientBuilder::native()
         .capabilities((*caps).clone())
-        .connect(&driver_instance)
+        .connect(DRIVER_INSTANCE.get().unwrap())
         .await?;
 
     client.set_window_size(1280, 720).await?;
 
-    if let Ok(()) = client.goto(url).await {
+    if let Ok(Ok(())) = timeout(*duration, client.goto(url)).await {
+    // if let Ok(()) = client.goto(url).await {
         let png_data = client.screenshot().await?;
         client.close().await?;
         let filename =
@@ -39,6 +45,8 @@ async fn take_ss(url: url::Url, port: u32) -> Result<(), Box<dyn std::error::Err
         fs::write(filename, &png_data).await?;
 
         println!("\x1b[0;32m[+] Captured screenshot of URL:\x1b[0m {}", url);
+    } else {
+        println!("\x1b[0;31m[-] Timed out URL:\x1b[0m {}", url);
     }
 
     Ok(())
@@ -108,7 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let driver_process = run_driver(port, matches.value_of("DRIVER")).await;
 
+
     println!("Started webdriver=> PID: {}", driver_process.0.id());
+    DRIVER_INSTANCE.set(format!("http://localhost:{}", port))?;
+
 
     if fs::metadata("screenshots/").await.is_err() {
         fs::create_dir("screenshots").await?;
@@ -121,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             for url in lines.lines() {
                 if let Ok(valid_url) = url::Url::parse(url) {
-                    handels.push(tokio::spawn(take_ss(valid_url, port)));
+                    handels.push(tokio::spawn(take_ss(valid_url)));
                 }
             }
 
@@ -131,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 );
             }
         } else if let Ok(valid_url) = url::Url::parse(url) {
-            take_ss(valid_url, port).await?;
+            take_ss(valid_url).await?;
         }
     }
 
