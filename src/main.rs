@@ -1,99 +1,88 @@
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version};
-use fantoccini::ClientBuilder;
 use once_cell::sync::{Lazy, OnceCell};
-use std::env;
-use std::process::{Command, Stdio};
-use tokio::fs;
-use std::time::Duration;
-use tokio::time::timeout;
+use reqwest::get;
+use std::{path::Path, process::Stdio, time::Duration};
+use tokio::{fs, process::Command, time::timeout};
 
-struct TemporaryProcess(std::process::Child);
-
-static DRIVER_INSTANCE: OnceCell<String> = OnceCell::new();
-
-
-impl Drop for TemporaryProcess {
-    fn drop(&mut self) {
-        println!("Killing spawned webdriver process=> PID: {}", self.0.id());
-        self.0.kill().and_then(|_| self.0.wait()).ok();
-    }
-}
+static OUTDIR: OnceCell<String> = OnceCell::new();
+static CHROME: OnceCell<String> = OnceCell::new();
+static MAX_TIME: Lazy<Duration> = Lazy::new(|| Duration::from_secs(10));
 
 async fn take_ss(url: url::Url) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = url.as_str();
-    let duration = Lazy::new(|| Duration::from_secs(15));
-    let caps = Lazy::new(|| {
-        let mut caps = serde_json::map::Map::new();
-        let chrome_opts = serde_json::json!({ "args": ["--headless"] });
-        caps.insert("goog:chromeOptions".to_string(), chrome_opts);
-        caps
-    });
 
-    let mut client = ClientBuilder::native()
-        .capabilities((*caps).clone())
-        .connect(DRIVER_INSTANCE.get().unwrap())
-        .await?;
+    let screenshot = "--screenshot=".to_owned()
+        + OUTDIR.get().unwrap()
+        + &url.replace("://", "-").replace("/", "_")
+        + ".png";
+    let mut chrome_command = Command::new(CHROME.get().unwrap())
+        .args([
+            "--mute-audio",
+            "--disable-notifications",
+            "--no-first-run",
+            "--disable-crash-reporter",
+            "--disable-infobars",
+            "--disable-sync",
+            "--no-default-browser-check",
+            "--ignore-certificate-errors",
+            "--ignore-urlfetcher-cert-requests",
+            "--no-sandbox",
+            "--headless",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--hide-scrollbars",
+            "--incognito",
+            "--window-size=1280,720",
+            &screenshot,
+            url,
+        ])
+        .stdout(Stdio::null())
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
 
-    client.set_window_size(1280, 720).await?;
-
-    if let Ok(Ok(())) = timeout(*duration, client.goto(url)).await {
-    // if let Ok(()) = client.goto(url).await {
-        let png_data = client.screenshot().await?;
-        client.close().await?;
-        let filename =
-            "screenshots/".to_owned() + &url.replace("://", "-").replace("/", "_") + ".png";
-        fs::write(filename, &png_data).await?;
-
-        println!("\x1b[0;32m[+] Captured screenshot of URL:\x1b[0m {}", url);
+    if let Ok(Ok(res)) = timeout(*MAX_TIME, get(url)).await {
+        println!(
+            "\x1b[0;32m[+] Status:\x1b[0m {} \x1b[0;32m => URL: \x1b[0m {}",
+            res.status(),
+            url
+        );
+        chrome_command.wait().await?;
     } else {
         println!("\x1b[0;31m[-] Timed out URL:\x1b[0m {}", url);
+        chrome_command.kill().await?;
     }
 
     Ok(())
 }
 
-async fn run_driver(port: u32, driver_path: Option<&str>) -> TemporaryProcess {
-    let chromedriver = if cfg!(windows) {
-        "chromedriver.exe"
-    } else {
-        "chromedriver"
-    };
-    let mut found_driver: Option<&str> = None;
-    if driver_path.is_none() {
-        match env::var_os("PATH") {
-            Some(paths) => {
-                for mut path in env::split_paths(&paths) {
-                    // check if chromedriver exists
-                    path.push(chromedriver);
-                    if path.as_path().exists() {
-                        found_driver = Some(chromedriver);
-                        break;
-                    }
-                }
-            }
-            None => println!("PATH is not defined in the environment."),
-        };
-    } else {
-        found_driver = driver_path;
+fn find_chrome() -> String {
+    let chrome_paths = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-beta",
+        "/usr/bin/google-chrome-unstable",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+    ];
+
+    let mut found_chrome = String::new();
+    for path in chrome_paths {
+        if Path::new(path).exists() {
+            found_chrome.push_str(path);
+            break;
+        }
     }
 
-    let port_arg = format!("--port={}", port);
-
-    let driver_process = if let Some(driver) = found_driver {
-        TemporaryProcess(
-            Command::new(driver)
-                .arg(port_arg)
-                .stdout(Stdio::null())
-                .stdin(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("Provided driver is not valid"),
-        )
-    } else {
-        panic!("No WebDriver found :(\nThis program need a WebDriver like chromedriver");
+    if found_chrome.is_empty() {
+        panic!("Chrome / Chromium not found :(\nPlease install Chrome/Chromium and try again!");
     };
 
-    driver_process
+    found_chrome
 }
 
 #[tokio::main]
@@ -103,26 +92,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         (author: crate_authors!())
         (about: crate_description!())
         (@arg URL: +takes_value +required "Website URLs / Filename of file containing URLs")
-        (@arg DRIVER: -d --driver +takes_value  "Specify WebDriver path")
-        (@arg PORT: -p --port +takes_value  "Port for running WebDriver")
+        (@arg PATH: -p --path +takes_value  "Specify valid path to Chrome/Chromium")
+        (@arg OUTDIR: -o --output +takes_value  "Output directory to save screenshots")
     )
     .get_matches();
 
-    let port = matches
-        .value_of("PORT")
-        .unwrap_or("1337")
-        .parse()
-        .unwrap_or(1337);
+    let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
 
-    let driver_process = run_driver(port, matches.value_of("DRIVER")).await;
+    if fs::metadata(outdir).await.is_err() {
+        fs::create_dir(outdir).await?;
+    }
 
+    OUTDIR.set(outdir.to_owned() + "/")?;
 
-    println!("Started webdriver=> PID: {}", driver_process.0.id());
-    DRIVER_INSTANCE.set(format!("http://localhost:{}", port))?;
-
-
-    if fs::metadata("screenshots/").await.is_err() {
-        fs::create_dir("screenshots").await?;
+    if let Some(path) = matches.value_of("PATH") {
+        CHROME.set(path.to_string())?;
+    } else {
+        CHROME.set(find_chrome())?;
     }
 
     if let Some(url) = matches.value_of("URL") {
