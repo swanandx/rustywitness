@@ -38,8 +38,7 @@ async fn take_screenshots(
     Ok(())
 }
 
-// #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let matches = clap_app!((crate_name!()) =>
         (version: crate_version!())
@@ -52,12 +51,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
 
-    if fs::metadata(outdir).await.is_err() {
-        fs::create_dir(outdir).await?;
-    }
-
-    let outdir = Path::new(outdir);
-    assert!(env::set_current_dir(&outdir).is_ok());
 
     if let Some(url) = matches.value_of("URL") {
         let browser = Browser::new(
@@ -65,6 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .window_size(Some((1280, 720)))
                 .build()?,
         )?;
+
+        if fs::metadata(outdir).await.is_err() {
+        fs::create_dir(outdir).await?;
+    }
 
         if fs::metadata(url).await.is_ok() {
             let file = std::fs::File::open(url)?;
@@ -77,14 +74,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     urls.push(url);
                 }
             }
-
+            let outdir = Path::new(outdir);
+            assert!(env::set_current_dir(&outdir).is_ok());
             stream::iter(urls)
-                .map(|url| tokio::spawn(take_screenshots(browser.new_tab().unwrap(), url)))
+                .map(|url| {
+                    tokio::spawn(take_screenshots(
+                        browser.new_tab().expect("Failed to create a tab"),
+                        url,
+                    ))
+                })
                 .buffer_unordered(PARALLEL_REQUESTS)
                 .collect::<Vec<_>>()
                 .await;
         } else if let Ok(valid_url) = url::Url::parse(url) {
+            let outdir = Path::new(outdir);
+            assert!(env::set_current_dir(&outdir).is_ok());
             take_screenshots(browser.new_tab()?, valid_url).await?;
+        } else {
+            println!("{:?}", fs::metadata(url).await);
         }
     }
 
