@@ -1,4 +1,4 @@
-use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version};
+use clap::{Arg, App, crate_authors, crate_description, crate_name, crate_version};
 use futures::{stream, StreamExt};
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::get;
@@ -17,15 +17,26 @@ const PARALLEL_REQUESTS: usize = 4;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let matches = clap_app!((crate_name!()) =>
-        (version: crate_version!())
-        (author: crate_authors!())
-        (about: crate_description!())
-        (@arg URL: +takes_value +required "Website URLs / Filename of file containing URLs")
-        (@arg PATH: -p --path +takes_value  "Specify valid path to Chrome/Chromium")
-        (@arg OUTDIR: -o --output +takes_value  "Output directory to save screenshots")
-    )
-    .get_matches();
+
+    let matches = App::new(crate_name!())
+                          .version(crate_version!())
+                          .author(crate_authors!())
+                          .about(crate_description!())
+                          .arg(Arg::with_name("URL")
+                               .help("Website URL / Filename of file containing URLs")
+                               .required(true)
+                               .takes_value(true))
+                          .arg(Arg::with_name("PATH")
+                               .help("Specify valid path to Chrome/Chromium")
+                               .takes_value(true)
+                               .short("p")
+                               .long("path"))
+                          .arg(Arg::with_name("OUTDIR")
+                               .help("Output directory to save screenshots")
+                               .takes_value(true)
+                               .short("o")
+                               .long("output"))
+                          .get_matches();
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
 
