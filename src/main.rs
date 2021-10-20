@@ -1,4 +1,5 @@
-use clap::{Arg, App, crate_authors, crate_description, crate_name, crate_version};
+use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+use colored::Colorize;
 use futures::{stream, StreamExt};
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::get;
@@ -13,41 +14,63 @@ use tokio::{process::Command, time::timeout};
 
 static CHROME: OnceCell<String> = OnceCell::new();
 static MAX_TIME: Lazy<Duration> = Lazy::new(|| Duration::from_secs(10));
-const PARALLEL_REQUESTS: usize = 4;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
     let matches = App::new(crate_name!())
-                          .version(crate_version!())
-                          .author(crate_authors!())
-                          .about(crate_description!())
-                          .arg(Arg::with_name("URL")
-                               .help("Website URL / Filename of file containing URLs")
-                               .required(true)
-                               .takes_value(true))
-                          .arg(Arg::with_name("PATH")
-                               .help("Specify valid path to Chrome/Chromium")
-                               .takes_value(true)
-                               .short("p")
-                               .long("path"))
-                          .arg(Arg::with_name("OUTDIR")
-                               .help("Output directory to save screenshots")
-                               .takes_value(true)
-                               .short("o")
-                               .long("output"))
-                          .get_matches();
+        .version(crate_version!())
+        .author(crate_authors!())
+        .about(crate_description!())
+        .arg(
+            Arg::with_name("URL")
+                .help("Website URL / Filename of file containing URLs")
+                .required(true)
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("PATH")
+                .help("Specify valid path to Chrome/Chromium")
+                .takes_value(true)
+                .short("p")
+                .long("path"),
+        )
+        .arg(
+            Arg::with_name("OUTDIR")
+                .help("Output directory to save screenshots")
+                .takes_value(true)
+                .short("o")
+                .long("output"),
+        )
+        .arg(
+            Arg::with_name("MAX")
+                .help("Maximum number of parallel tasks. Recommend to keep it small, default is 4.")
+                .takes_value(true)
+                .short("m")
+                .long("max"),
+        )
+        .get_matches();
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
+
+    let mut parallel_tasks: usize = 4;
 
     if fs::metadata(outdir).is_err() {
         fs::create_dir(outdir)?;
     }
 
-    if let Some(path) = matches.value_of("PATH") {
-        CHROME.set(path.to_string())?;
-    } else {
-        CHROME.set(find_chrome())?;
+    CHROME.set(
+        {
+            if let Some(path) = matches.value_of("PATH") {
+                path
+            } else {
+                find_chrome()?
+            }
+        }
+        .to_string(),
+    )?;
+
+    if let Some(max) = matches.value_of("MAX") {
+        parallel_tasks = max.parse()?;
     }
 
     if let Some(url) = matches.value_of("URL") {
@@ -68,48 +91,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             stream::iter(urls)
                 .map(|url| tokio::spawn(take_screenshot(url)))
-                .buffer_unordered(PARALLEL_REQUESTS)
+                .buffer_unordered(parallel_tasks)
                 .collect::<Vec<_>>()
                 .await;
         } else if let Ok(valid_url) = url::Url::parse(url) {
             let outdir = Path::new(outdir);
             assert!(env::set_current_dir(&outdir).is_ok());
             take_screenshot(valid_url).await?;
+        } else {
+            eprintln!(
+                "{} {} {:?}",
+                "Invalid URL =>".red(),
+                url,
+                url::Url::parse(url)
+            );
         }
     }
 
-    println!("\x1b[0;34m[*] Done :D\x1b[0m");
+    println!("{}", "[*] Done :D".cyan());
     Ok(())
 }
 
 async fn take_screenshot(url: url::Url) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = url.as_str();
 
-    let screenshot =
-        "--screenshot=".to_owned() + &url.replace("://", "-").replace("/", "_") + ".png";
+    let screenshot_argument = format!(
+        "--screenshot={}.png",
+        &url.replace("://", "-").replace("/", "_")
+    );
     let mut chrome_command = Command::new(CHROME.get().unwrap())
         .args(&ARGS)
-        .arg(screenshot)
+        .arg(screenshot_argument)
         .arg(url)
         .stderr(Stdio::piped())
         .spawn()?;
 
     if let Ok(Ok(res)) = timeout(*MAX_TIME, get(url)).await {
         println!(
-            "\x1b[0;32m[+] Status:\x1b[0m {} \x1b[0;32m => URL: \x1b[0m {}",
+            "{} {} => {} {}",
+            "[+] Status:".green(),
             res.status(),
+            "URL:".green(),
             url
         );
         chrome_command.wait().await?;
     } else {
-        println!("\x1b[0;31m[-] Timed out URL:\x1b[0m {}", url);
+        eprintln!("{} {}", "[-] Timed out URL:".red(), url);
         chrome_command.kill().await?;
     }
 
     Ok(())
 }
 
-fn find_chrome() -> String {
+fn find_chrome() -> Result<&'static str, &'static str> {
     let chrome_paths = [
         "google-chrome",
         "google-chrome-stable",
@@ -120,21 +154,13 @@ fn find_chrome() -> String {
         "chrome.exe",
     ];
 
-    let mut found_chrome = String::new();
     for path in chrome_paths {
         if which::which(path).is_ok() {
-            found_chrome.push_str(path);
-            break;
+            return Ok(path);
         }
     }
 
-    if found_chrome.is_empty() {
-        panic!(
-            "Chrome / Chromium not found :(\nPlease install Chrome/Chromium or specify path to it!"
-        );
-    };
-
-    found_chrome
+    Err("Chrome / Chromium not found :(\nPlease install Chrome/Chromium or specify path to it!")
 }
 
 static ARGS: [&str; 15] = [
