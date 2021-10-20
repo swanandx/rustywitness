@@ -36,14 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .arg(
             Arg::with_name("OUTDIR")
-                .help("Output directory to save screenshots")
+                .help("Output directory to save screenshots (default 'screenshots')")
                 .takes_value(true)
                 .short("o")
                 .long("output"),
         )
         .arg(
             Arg::with_name("MAX")
-                .help("Maximum number of parallel tasks. Recommend to keep it small, default is 4.")
+                .help("Maximum number of parallel tasks (default 4)")
                 .takes_value(true)
                 .short("m")
                 .long("max"),

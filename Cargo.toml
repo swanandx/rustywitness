@@ -2,6 +2,15 @@
 name = "rustywitness"
 version = "0.1.0"
 edition = "2018"
+authors = ["swanandx"]
+description = "Web screenshots utility using headless chrome"
+readme = "README.md"
+repository = "https://github.com/swanandx/rustywitness"
+homepage = "https://github.com/swanandx/rustywitness"
+license = "MIT"
+keywords = ["bug-bounty", "chrome", "recon", "screenshot", "web"]
+categories = ["accessibility", "command-line-utilities", "asynchronous"]
+documentation = "https://docs.rs/rustywitness"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
