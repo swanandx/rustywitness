@@ -58,6 +58,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         fs::create_dir(outdir)?;
     }
 
+    // Use user specified path for chrome,
+    // if not specified, check if chrome is in path.
     CHROME.set(
         {
             if let Some(path) = matches.value_of("PATH") {
@@ -80,23 +82,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             let mut urls = Vec::new();
 
+            //Only take valid URLs
             for line in lines.flatten() {
                 if let Ok(url) = url::Url::parse(&line) {
                     urls.push(url);
                 }
             }
 
-            let outdir = Path::new(outdir);
-            assert!(env::set_current_dir(&outdir).is_ok());
+            // Set current working directory to output directory
+            // So that we can save screenshots in it without specifying whole path.
+            assert!(env::set_current_dir(Path::new(outdir)).is_ok());
 
+            // Limit the number of parallel tasks using buffer_unordered()
             stream::iter(urls)
                 .map(|url| tokio::spawn(take_screenshot(url)))
                 .buffer_unordered(parallel_tasks)
                 .collect::<Vec<_>>()
                 .await;
         } else if let Ok(valid_url) = url::Url::parse(url) {
-            let outdir = Path::new(outdir);
-            assert!(env::set_current_dir(&outdir).is_ok());
+            assert!(env::set_current_dir(Path::new(outdir)).is_ok());
             take_screenshot(valid_url).await?;
         } else {
             eprintln!(
@@ -163,6 +167,7 @@ fn find_chrome() -> Result<&'static str, &'static str> {
     Err("Chrome / Chromium not found :(\nPlease install Chrome/Chromium or specify path to it!")
 }
 
+// Arguments for chrome
 static ARGS: [&str; 15] = [
     "--mute-audio",
     "--disable-notifications",
