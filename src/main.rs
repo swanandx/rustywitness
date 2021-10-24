@@ -13,7 +13,11 @@ use std::{
 use tokio::{process::Command, time::timeout};
 
 static CHROME: OnceCell<String> = OnceCell::new();
+// static OUTDIR: OnceCell<String> = OnceCell::new();
 static MAX_TIME: Lazy<Duration> = Lazy::new(|| Duration::from_secs(10));
+
+#[cfg(windows)]
+use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -54,25 +58,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut parallel_tasks: usize = 4;
 
-    if fs::metadata(outdir).is_err() {
-        fs::create_dir(outdir)?;
-    }
-
     // Use user specified path for chrome,
     // if not specified, check if chrome is in path.
-    CHROME.set(
-        {
-            if let Some(path) = matches.value_of("PATH") {
-                path
-            } else {
-                find_chrome()?
-            }
+    CHROME.set({
+        if let Some(path) = matches.value_of("PATH") {
+            path.to_string()
+        } else {
+            default_executable()?
         }
-        .to_string(),
-    )?;
+    })?;
 
     if let Some(max) = matches.value_of("MAX") {
         parallel_tasks = max.parse()?;
+    }
+    if fs::metadata(outdir).is_err() {
+        fs::create_dir(outdir)?;
     }
 
     if let Some(url) = matches.value_of("URL") {
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .collect::<Vec<_>>()
                 .await;
         } else if let Ok(valid_url) = url::Url::parse(url) {
-            assert!(env::set_current_dir(Path::new(outdir)).is_ok());
+            env::set_current_dir(Path::new(outdir))?;
             take_screenshot(valid_url).await?;
         } else {
             eprintln!(
@@ -119,10 +119,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 async fn take_screenshot(url: url::Url) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = url.as_str();
 
-    let screenshot_argument = format!(
-        "--screenshot={}.png",
-        &url.replace("://", "-").replace("/", "_")
-    );
+    let screenshot_argument = {
+        #[cfg(not(windows))]
+        {
+            format!(
+                "--screenshot={}.png",
+                &url.replace("://", "-").replace("/", "_")
+            )
+        }
+
+        #[cfg(windows)]
+        {
+            let mut path = env::current_dir()?;
+            path.push(url.replace("://", "-").replace("/", "_") + ".png");
+            format!("--screenshot={}", path.display())
+        }
+    };
+
     let mut chrome_command = Command::new(CHROME.get().unwrap())
         .args(&ARGS)
         .arg(screenshot_argument)
@@ -147,26 +160,47 @@ async fn take_screenshot(url: url::Url) -> Result<(), Box<dyn std::error::Error 
     Ok(())
 }
 
-fn find_chrome() -> Result<&'static str, &'static str> {
-    let chrome_paths = [
-        "google-chrome",
+// Reference :-
+// https://github.com/atroche/rust-headless-chrome/blob/master/src/browser/process.rs
+fn default_executable() -> Result<String, &'static str> {
+    if let Ok(path) = std::env::var("CHROME") {
+        if std::path::Path::new(&path).exists() {
+            return Ok(path);
+        }
+    }
+
+    for app in [
         "google-chrome-stable",
         "chromium",
         "chromium-browser",
         "chrome",
         "chrome-browser",
-        "chrome.exe",
-    ];
+    ] {
+        if which::which(app).is_ok() {
+            return Ok(app.to_string());
+        }
+    }
 
-    for path in chrome_paths {
-        if which::which(path).is_ok() {
+    #[cfg(target_os = "macos")]
+    {
+        let path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+        if std::path::Path::new(&path).exists() {
+            return Ok(path.to_string());
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(path) = RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe")
+            .and_then(|key| key.get_value::<String, _>(""))
+        {
             return Ok(path);
         }
     }
 
-    Err("Chrome / Chromium not found :(\nPlease install Chrome/Chromium or specify path to it!")
+    Err("Could not auto detect a chrome executable")
 }
-
 // Arguments for chrome
 static ARGS: [&str; 15] = [
     "--mute-audio",
