@@ -13,7 +13,6 @@ use std::{
 use tokio::{process::Command, time::timeout};
 
 static CHROME: OnceCell<String> = OnceCell::new();
-// static OUTDIR: OnceCell<String> = OnceCell::new();
 static MAX_TIME: Lazy<Duration> = Lazy::new(|| Duration::from_secs(10));
 
 #[cfg(windows)]
@@ -56,8 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
 
-    let mut parallel_tasks: usize = 4;
-
     // Use user specified path for chrome,
     // if not specified, check if chrome is in path.
     CHROME.set({
@@ -68,9 +65,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     })?;
 
+    let mut parallel_tasks: usize = 4;
     if let Some(max) = matches.value_of("MAX") {
         parallel_tasks = max.parse()?;
     }
+
     if fs::metadata(outdir).is_err() {
         fs::create_dir(outdir)?;
     }
@@ -91,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             // Set current working directory to output directory
             // So that we can save screenshots in it without specifying whole path.
-            assert!(env::set_current_dir(Path::new(outdir)).is_ok());
+            env::set_current_dir(Path::new(outdir))?;
 
             // Limit the number of parallel tasks using buffer_unordered()
             stream::iter(urls)
@@ -201,6 +200,7 @@ fn default_executable() -> Result<String, &'static str> {
 
     Err("Could not auto detect a chrome executable")
 }
+
 // Arguments for chrome
 static ARGS: [&str; 15] = [
     "--mute-audio",
