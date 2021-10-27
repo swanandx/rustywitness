@@ -96,4 +96,4 @@ There is always scope for improvements and bugs to be fixed! Just open a issue o
 
 # Acknowledgement
 
-Similar projects like `Gowitness`, `Aquatone`, `Eyewitness` etc. were very helpful as a reference.
+[Similar](https://github.com/sensepost/gowitness) [projects](https://github.com/michenriksen/aquatone) were very helpful as a reference. Special thanks to [siddicky](https://github.com/siddicky) and [Drago](https://github.com/vaishnavpardhi) for testing it!

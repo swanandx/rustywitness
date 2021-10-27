@@ -1,5 +1,4 @@
 use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
-use colored::Colorize;
 use futures::{stream, StreamExt};
 use once_cell::sync::{Lazy, OnceCell};
 use reqwest::get;
@@ -103,15 +102,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             take_screenshot(valid_url).await?;
         } else {
             eprintln!(
-                "{} {} {:?}",
-                "Invalid URL =>".red(),
+                "\x1b[0;31mInvalid URL:\x1b[0m {} {:?}",
                 url,
                 url::Url::parse(url)
             );
         }
     }
 
-    println!("{}", "[*] Done :D".cyan());
+    println!("\x1b[0;34m[*] Done :D\x1b[0m");
     Ok(())
 }
 
@@ -144,15 +142,13 @@ async fn take_screenshot(url: url::Url) -> Result<(), Box<dyn std::error::Error 
 
     if let Ok(Ok(res)) = timeout(*MAX_TIME, get(url)).await {
         println!(
-            "{} {} => {} {}",
-            "[+] Status:".green(),
+            "\x1b[0;32m[+] Status:\x1b[0m {} \x1b[0;32m => URL: \x1b[0m {}",
             res.status(),
-            "URL:".green(),
             url
         );
         chrome_command.wait().await?;
     } else {
-        eprintln!("{} {}", "[-] Timed out URL:".red(), url);
+        eprintln!("\x1b[0;31m[-] Timed out URL:\x1b[0m {}", url);
         chrome_command.kill().await?;
     }
 
@@ -160,7 +156,7 @@ async fn take_screenshot(url: url::Url) -> Result<(), Box<dyn std::error::Error 
 }
 
 // Reference :-
-// https://github.com/atroche/rust-headless-chrome/blob/master/src/browser/process.rs
+// https://github.com/atroche/rust-headless-chrome/blob/7a7e2ac58a57051a4450eb0138c09d0c03c52598/src/browser/mod.rs#L409
 fn default_executable() -> Result<String, &'static str> {
     if let Ok(path) = std::env::var("CHROME") {
         if std::path::Path::new(&path).exists() {
@@ -170,6 +166,7 @@ fn default_executable() -> Result<String, &'static str> {
 
     for app in [
         "google-chrome-stable",
+        "google-chrome",
         "chromium",
         "chromium-browser",
         "chrome",
@@ -198,7 +195,7 @@ fn default_executable() -> Result<String, &'static str> {
         }
     }
 
-    Err("Could not auto detect a chrome executable")
+    Err("Chrome / Chromium not found :(\nPlease install Chrome/Chromium or specify path to it!")
 }
 
 // Arguments for chrome

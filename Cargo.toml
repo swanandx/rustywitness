@@ -10,7 +10,6 @@ homepage = "https://github.com/swanandx/rustywitness"
 license = "MIT"
 keywords = ["bug-bounty", "chrome", "recon", "screenshot", "web"]
 categories = ["accessibility", "command-line-utilities", "asynchronous"]
-documentation = "https://docs.rs/rustywitness"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,7 +20,6 @@ reqwest = "0.11.4"
 futures = "0.3.17"
 once_cell = "1.8.0"
 which = "4.2.2"
-colored = "2.0.0"
 tokio = { version = "1.12.0", features = ["full"] }
 
 [target.'cfg(windows)'.dependencies]
