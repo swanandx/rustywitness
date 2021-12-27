@@ -45,7 +45,7 @@
 <div align="center">
   <sub>Built with ❤︎ by
   <a href="https://twitter.com/_swanandx">swanandx</a> and
-  <a href="https://github.com/choojs/choo/graphs/contributors">
+  <a href="https://github.com/swanandx/rustywitness/graphs/contributors">
     contributors
   </a>
 </div>
