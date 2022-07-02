@@ -11,9 +11,11 @@ use tokio::{fs, time::timeout};
 use futures::StreamExt;
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::cdp::browser_protocol::page::{CaptureScreenshotFormat, CaptureScreenshotParams};
-use chromiumoxide::Page;
+use chromiumoxide::cdp::browser_protocol::page::{
+    CaptureScreenshotFormat, CaptureScreenshotParams,
+};
 use chromiumoxide::handler::viewport::Viewport;
+use chromiumoxide::Page;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -50,13 +52,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .no_sandbox()
             .window_size(1440, 900)
             .viewport(Viewport {
-            width: 1440,
-            height: 900,
-            device_scale_factor: None,
-            emulating_mobile: false,
-            is_landscape: false,
-            has_touch: false,
-        })
+                width: 1440,
+                height: 900,
+                device_scale_factor: None,
+                emulating_mobile: false,
+                is_landscape: false,
+                has_touch: false,
+            })
             .build()?,
     )
     .await?;
@@ -83,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             let mut urls = vec![Vec::new(); parallel_tabs];
             let mut pt = 0;
-            
+
             // Only take valid URLs
             // push them in urls in round robin manner
             for line in lines.flatten() {
