@@ -1,21 +1,19 @@
 use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
-use futures::{stream, StreamExt};
-use once_cell::sync::{Lazy, OnceCell};
 use reqwest::get;
 use std::{
-    env, fs,
+    env,
     io::{BufRead, BufReader},
     path::Path,
-    process::Stdio,
     time::Duration,
 };
-use tokio::{process::Command, time::timeout};
+use tokio::{fs, time::timeout};
 
-static CHROME: OnceCell<String> = OnceCell::new();
-static MAX_TIME: Lazy<Duration> = Lazy::new(|| Duration::from_secs(10));
+use futures::StreamExt;
 
-#[cfg(windows)]
-use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::page::{CaptureScreenshotFormat, CaptureScreenshotParams};
+use chromiumoxide::Page;
+use chromiumoxide::handler::viewport::Viewport;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -30,13 +28,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("PATH")
-                .help("Specify valid path to Chrome/Chromium")
-                .takes_value(true)
-                .short("p")
-                .long("path"),
-        )
-        .arg(
             Arg::with_name("OUTDIR")
                 .help("Output directory to save screenshots (default 'screenshots')")
                 .takes_value(true)
@@ -45,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .arg(
             Arg::with_name("MAX")
-                .help("Maximum number of parallel tasks (default 4)")
+                .help("Maximum number of parallel tabs (default 4)")
                 .takes_value(true)
                 .short("m")
                 .long("max"),
@@ -54,36 +45,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
 
-    // Use user specified path for chrome,
-    // if not specified, check if chrome is in path.
-    CHROME.set({
-        if let Some(path) = matches.value_of("PATH") {
-            path.to_string()
-        } else {
-            default_executable()?
-        }
-    })?;
+    let (browser, mut handler) = Browser::launch(
+        BrowserConfig::builder()
+            .no_sandbox()
+            .window_size(1440, 900)
+            .viewport(Viewport {
+            width: 1440,
+            height: 900,
+            device_scale_factor: None,
+            emulating_mobile: false,
+            is_landscape: false,
+            has_touch: false,
+        })
+            .build()?,
+    )
+    .await?;
 
-    let mut parallel_tasks: usize = 4;
+    let _handle = tokio::task::spawn(async move {
+        loop {
+            let _ = handler.next().await.unwrap();
+        }
+    });
+
+    let mut parallel_tabs: usize = 4;
     if let Some(max) = matches.value_of("MAX") {
-        parallel_tasks = max.parse()?;
+        parallel_tabs = max.parse()?;
     }
 
-    if fs::metadata(outdir).is_err() {
-        fs::create_dir(outdir)?;
+    if fs::metadata(outdir).await.is_err() {
+        fs::create_dir(outdir).await?;
     }
 
     if let Some(url) = matches.value_of("URL") {
-        if fs::metadata(url).is_ok() {
-            let file = fs::File::open(url)?;
+        if fs::metadata(url).await.is_ok() {
+            let file = std::fs::File::open(url)?;
             let lines = BufReader::new(file).lines();
 
-            let mut urls = Vec::new();
-
-            //Only take valid URLs
+            let mut urls = vec![Vec::new(); parallel_tabs];
+            let mut pt = 0;
+            
+            // Only take valid URLs
+            // push them in urls in round robin manner
             for line in lines.flatten() {
                 if let Ok(url) = url::Url::parse(&line) {
-                    urls.push(url);
+                    urls[pt].push(url);
+                    pt += 1;
+                    pt %= parallel_tabs;
                 }
             }
 
@@ -91,15 +98,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // So that we can save screenshots in it without specifying whole path.
             env::set_current_dir(Path::new(outdir))?;
 
-            // Limit the number of parallel tasks using buffer_unordered()
-            stream::iter(urls)
-                .map(|url| tokio::spawn(take_screenshot(url)))
-                .buffer_unordered(parallel_tasks)
-                .collect::<Vec<_>>()
-                .await;
+            let mut handles = Vec::new();
+
+            for chunk in urls {
+                let n_tab = browser.new_page("about:blank").await?;
+                let h = tokio::spawn(take_screenshots(n_tab, chunk));
+                handles.push(h);
+            }
+
+            for handle in handles {
+                handle.await?.expect(
+                    "Something went wrong while waiting for taking screenshot and saving to file",
+                );
+            }
         } else if let Ok(valid_url) = url::Url::parse(url) {
             env::set_current_dir(Path::new(outdir))?;
-            take_screenshot(valid_url).await?;
+            let n_tab = browser.new_page("about:blank").await?;
+            take_screenshots(n_tab, vec![valid_url]).await?;
         } else {
             eprintln!(
                 "\x1b[0;31mInvalid URL:\x1b[0m {} {:?}",
@@ -110,109 +125,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     println!("\x1b[0;34m[*] Done :D\x1b[0m");
-    Ok(())
-}
-
-async fn take_screenshot(url: url::Url) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let url = url.as_str();
-
-    let screenshot_argument = {
-        #[cfg(not(windows))]
-        {
-            format!(
-                "--screenshot={}.png",
-                &url.replace("://", "-").replace("/", "_")
-            )
-        }
-
-        #[cfg(windows)]
-        {
-            let mut path = env::current_dir()?;
-            path.push(url.replace("://", "-").replace("/", "_") + ".png");
-            format!("--screenshot={}", path.display())
-        }
-    };
-
-    let mut chrome_command = Command::new(CHROME.get().unwrap())
-        .args(&ARGS)
-        .arg(screenshot_argument)
-        .arg(url)
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    if let Ok(Ok(res)) = timeout(*MAX_TIME, get(url)).await {
-        println!(
-            "\x1b[0;32m[+] Status:\x1b[0m {} \x1b[0;32m => URL: \x1b[0m {}",
-            res.status(),
-            url
-        );
-        chrome_command.wait().await?;
-    } else {
-        eprintln!("\x1b[0;31m[-] Timed out URL:\x1b[0m {}", url);
-        chrome_command.kill().await?;
-    }
 
     Ok(())
 }
 
-// Reference :-
-// https://github.com/atroche/rust-headless-chrome/blob/7a7e2ac58a57051a4450eb0138c09d0c03c52598/src/browser/mod.rs#L409
-fn default_executable() -> Result<String, &'static str> {
-    if let Ok(path) = std::env::var("CHROME") {
-        if std::path::Path::new(&path).exists() {
-            return Ok(path);
+async fn take_screenshots(
+    page: Page,
+    urls: Vec<reqwest::Url>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for url in urls {
+        let url = url.as_str();
+        if let Ok(Ok(res)) = timeout(Duration::from_secs(10), get(url)).await {
+            let filename = url.replace("://", "-").replace('/', "_") + ".png";
+            page.goto(url)
+                .await?
+                .save_screenshot(
+                    CaptureScreenshotParams::builder()
+                        .format(CaptureScreenshotFormat::Png)
+                        .build(),
+                    filename,
+                )
+                .await?;
+            println!(
+                "\x1b[0;32m[+] status=\x1b[0m{}\x1b[0;32m title=\x1b[0m{}\x1b[0;32m URL=\x1b[0m{}",
+                res.status(),
+                page.get_title().await?.unwrap_or_default(),
+                url
+            );
+        } else {
+            println!("\x1b[0;31m[-] Timed out URL=\x1b[0m {}", url);
         }
     }
 
-    for app in [
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium",
-        "chromium-browser",
-        "chrome",
-        "chrome-browser",
-    ] {
-        if which::which(app).is_ok() {
-            return Ok(app.to_string());
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-        if std::path::Path::new(&path).exists() {
-            return Ok(path.to_string());
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        if let Ok(path) = RegKey::predef(HKEY_LOCAL_MACHINE)
-            .open_subkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe")
-            .and_then(|key| key.get_value::<String, _>(""))
-        {
-            return Ok(path);
-        }
-    }
-
-    Err("Chrome / Chromium not found :(\nPlease install Chrome/Chromium or specify path to it!")
+    Ok(())
 }
-
-// Arguments for chrome
-static ARGS: [&str; 15] = [
-    "--mute-audio",
-    "--disable-notifications",
-    "--no-first-run",
-    "--disable-crash-reporter",
-    "--disable-infobars",
-    "--disable-sync",
-    "--no-default-browser-check",
-    "--ignore-certificate-errors",
-    "--ignore-urlfetcher-cert-requests",
-    "--no-sandbox",
-    "--headless",
-    "--disable-dev-shm-usage",
-    "--hide-scrollbars",
-    "--incognito",
-    "--window-size=1440,900",
-];

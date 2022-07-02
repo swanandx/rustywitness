@@ -17,13 +17,9 @@ categories = ["accessibility", "command-line-utilities", "asynchronous"]
 clap = "2.33.3"
 url = "2.2.2"
 reqwest = "0.11.4"
-futures = "0.3.17"
-once_cell = "1.8.0"
-which = "4.2.2"
-tokio = { version = "1.12.0", features = ["full"] }
-
-[target.'cfg(windows)'.dependencies]
-winreg = "0.10"
+tokio = { version = "1", features = ["full"] }
+chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", features = ["tokio-runtime"], default-features = false, branch = "main"}
+futures = "0.3.21"
 
 [profile.release]
 lto = true
