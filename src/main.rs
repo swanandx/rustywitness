@@ -43,17 +43,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .short("m")
                 .long("max"),
         )
+        .arg(
+            Arg::with_name("WIDTH")
+                .help("Width of screenshot (default 1400)")
+                .takes_value(true)
+                .short("w")
+                .long("width"),
+        )
+        .arg(
+            Arg::with_name("HEIGHT")
+                .help("Height of screenshot (default 900)")
+                .takes_value(true)
+                .short("h")
+                .long("height"),
+        )
         .get_matches();
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
+    let width: u32 = matches
+        .value_of("WIDTH")
+        .unwrap_or("1400")
+        .parse()
+        .unwrap_or(1400);
+    let height: u32 = matches
+        .value_of("HEIGHT")
+        .unwrap_or("900")
+        .parse()
+        .unwrap_or(900);
 
     let (browser, mut handler) = Browser::launch(
         BrowserConfig::builder()
             .no_sandbox()
-            .window_size(1440, 900)
+            .window_size(width, height)
             .viewport(Viewport {
-                width: 1440,
-                height: 900,
+                width,
+                height,
                 device_scale_factor: None,
                 emulating_mobile: false,
                 is_landscape: false,
