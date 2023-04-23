@@ -14,12 +14,12 @@ categories = ["accessibility", "command-line-utilities", "asynchronous"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = "2.33.3"
-url = "2.2.2"
-reqwest = "0.11.4"
+clap = "2.34.0"
+url = "2.3.1"
+reqwest = "0.11.16"
 tokio = { version = "1", features = ["full"] }
 chromiumoxide = { git = "https://github.com/mattsse/chromiumoxide", features = ["tokio-runtime"], default-features = false, branch = "main"}
-futures = "0.3.21"
+futures = "0.3.28"
 
 [profile.release]
 lto = true

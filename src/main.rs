@@ -57,6 +57,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .short("h")
                 .long("height"),
         )
+        .arg(
+            Arg::with_name("PATH")
+                .help("Path to chrome executable")
+                .takes_value(true)
+                .short("p")
+                .long("path"),
+        )
         .get_matches();
 
     let outdir = matches.value_of("OUTDIR").unwrap_or("screenshots");
@@ -71,21 +78,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .parse()
         .unwrap_or(900);
 
-    let (browser, mut handler) = Browser::launch(
-        BrowserConfig::builder()
-            .no_sandbox()
-            .window_size(width, height)
-            .viewport(Viewport {
-                width,
-                height,
-                device_scale_factor: None,
-                emulating_mobile: false,
-                is_landscape: false,
-                has_touch: false,
-            })
-            .build()?,
-    )
-    .await?;
+    let mut config = BrowserConfig::builder()
+        .no_sandbox()
+        .window_size(width, height)
+        .viewport(Viewport {
+            width,
+            height,
+            device_scale_factor: None,
+            emulating_mobile: false,
+            is_landscape: false,
+            has_touch: false,
+        });
+
+    if let Some(path) = matches.value_of("PATH") {
+        config = config.chrome_executable(path);
+    }
+
+    let (browser, mut handler) = Browser::launch(config.build()?).await?;
 
     let _handle = tokio::task::spawn(async move {
         loop {
