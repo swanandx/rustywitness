@@ -50,17 +50,13 @@
   </a>
 </div>
 <!-- Thnx to choo for above README design <3 https://github.com/choojs/choo/blob/master/README.md -->
-
-# 🧰 Usage
-
-Just pass URL `rustywitness https://example.com` or /PATH/TO/FILE as argument `rustywitness 100-urls.txt`.
-
-You don't need to worry about remembering flags, it can determine if the argument is a file or a single URL!
+    
+    
+# 📝 Summary
+`rustywitness` is a website screenshot utility written in Rust, that uses Chrome Headless to generate screenshots of website interfaces using the CLI.
 
 
 # 🔭 Installation
-
-
 ### Download executable 📈
 
  You can directly download executable and run it. No need for any installation.
@@ -88,6 +84,38 @@ OR
 - `cd target/release/`
 - `./rustywitness`
 e.g. `./rustywitness <URL/FILENAME> [OPTIONS]`
+    
+    
+    
+# 🧰 Usage
+```
+rustywitness 0.1.0
+swanandx
+A CLI tool for getting screenshots of URLs using headless chrome
+
+USAGE:
+    rustywitness [OPTIONS] <URL>
+
+FLAGS:
+        --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -h, --height <HEIGHT>    Height of screenshot (default 900)
+    -m, --max <MAX>          Maximum number of parallel tabs (default 4)
+    -o, --output <OUTDIR>    Output directory to save screenshots (default 'screenshots')
+    -w, --width <WIDTH>      Width of screenshot (default 1400)
+
+ARGS:
+    <URL>    Website URL / Filename of file containing URLs 
+```
+
+- screenshot a single website `rustywitness https://example.com`
+- screenshot domain-list `rustywitness lives.txt`
+
+
+
+You don't need to worry about remembering flags, it can determine if the argument is a file or a single URL!
 
 
 # 🚧 Contributing
